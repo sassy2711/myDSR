@@ -23,7 +23,7 @@ batch_size = 128  # Increased for batch efficiency
 # Epsilon-Greedy Parameters
 epsilon = 1.0
 epsilon_min = 0.1
-epsilon_decay = 0.9997
+epsilon_decay = 0.99942
 
 # Load environment
 env = gym.make("Reacher-v5")
