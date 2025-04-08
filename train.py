@@ -101,7 +101,7 @@ for epoch in range(epochs):
                 # exit()
                 # Compute successor representations in batch
                 batch_actions = batch_actions.view(batch_size, action_dim)  # Ensure correct shape (batch_size, 2)
-                m_sa_batch = successor_net(phi_s_batch, batch_actions)
+                #m_sa_batch = successor_net(phi_s_batch, batch_actions)
                 
                 with torch.no_grad():
                     sampled_actions = torch.tensor(
@@ -112,25 +112,33 @@ for epoch in range(epochs):
                     m_sDash_a = successor_net_prev(phi_next_s_batch_expanded, sampled_actions)
                     q_values = (m_sDash_a @ w).squeeze(-1)
                     best_m_sDash_a = m_sDash_a[torch.arange(batch_size), q_values.argmax(dim=1)]
-                
-                # Compute target and loss
-                target_M = phi_s_batch + gamma * best_m_sDash_a * (1 - batch_dones.unsqueeze(1))
-                loss_sr = ((target_M - m_sa_batch) ** 2).mean()
 
                 # Compute reward loss efficiently
                 reward_pred_batch = (phi_s_batch @ w).squeeze()
                 reward_loss = ((batch_rewards - reward_pred_batch) ** 2).mean()
                 
+                # === Step 1: Optimize reward prediction loss (only w and feature_net) ===
                 optimizer_f.zero_grad()
-                optimizer_s.zero_grad()
                 optimizer_w.zero_grad()
-                
-                loss_sr.backward(retain_graph=True)
+
                 reward_loss.backward()
-                
                 optimizer_f.step()
-                optimizer_s.step()
                 optimizer_w.step()
+
+                # === Step 2: Optimize successor representation loss (only successor_net) ===
+                optimizer_s.zero_grad()
+
+                # Detach w and phi_s_batch to prevent backprop into them
+                phi_s_batch_detached = phi_s_batch.detach()
+                best_m_sDash_a_detached = best_m_sDash_a.detach()
+                target_M = phi_s_batch_detached + gamma * best_m_sDash_a_detached * (1 - batch_dones.unsqueeze(1))
+
+                m_sa_batch = successor_net(phi_s_batch_detached, batch_actions)
+                loss_sr = ((target_M - m_sa_batch) ** 2).mean()
+
+                loss_sr.backward()
+                optimizer_s.step()
+
             
             state = next_state
             total_reward += reward
