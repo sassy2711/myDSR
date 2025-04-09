@@ -15,7 +15,7 @@ print(f"Using device: {device}")
 gamma = 0.99
 lr = 2.5e-4
 momentum = 0.95
-epochs = 4000
+epochs = 10000
 feature_dim = 256
 num_action_samples = 50  # Reduced for efficiency
 batch_size = 128  # Increased for batch efficiency
@@ -68,6 +68,7 @@ for epoch in range(epochs):
 
             phi_s = feature_net(state)  # Compute feature representation
             
+            action = None
             with torch.no_grad():
                 if np.random.rand() < epsilon:  
                     # Random action (exploration)
@@ -118,14 +119,38 @@ for epoch in range(epochs):
                 reward_loss = ((batch_rewards - reward_pred_batch) ** 2).mean()
                 
                 # === Step 1: Optimize reward prediction loss (only w and feature_net) ===
+                # optimizer_f.zero_grad()
+                # optimizer_w.zero_grad()
+
+                # reward_loss.backward()
+                # optimizer_f.step()
+                # optimizer_w.step()
                 optimizer_f.zero_grad()
                 optimizer_w.zero_grad()
 
                 reward_loss.backward()
+
+                # 🔒 Gradient Clipping for feature_net and w
+                torch.nn.utils.clip_grad_norm_(feature_net.parameters(), max_norm=50)
+                torch.nn.utils.clip_grad_norm_([w], max_norm=50)
+
                 optimizer_f.step()
                 optimizer_w.step()
 
-                # === Step 2: Optimize successor representation loss (only successor_net) ===
+
+                # # === Step 2: Optimize successor representation loss (only successor_net) ===
+                # optimizer_s.zero_grad()
+
+                # # Detach w and phi_s_batch to prevent backprop into them
+                # phi_s_batch_detached = phi_s_batch.detach()
+                # best_m_sDash_a_detached = best_m_sDash_a.detach()
+                # target_M = phi_s_batch_detached + gamma * best_m_sDash_a_detached * (1 - batch_dones.unsqueeze(1))
+
+                # m_sa_batch = successor_net(phi_s_batch_detached, batch_actions)
+                # loss_sr = ((target_M - m_sa_batch) ** 2).mean()
+
+                # loss_sr.backward()
+                # optimizer_s.step()
                 optimizer_s.zero_grad()
 
                 # Detach w and phi_s_batch to prevent backprop into them
@@ -137,6 +162,10 @@ for epoch in range(epochs):
                 loss_sr = ((target_M - m_sa_batch) ** 2).mean()
 
                 loss_sr.backward()
+
+                # 🔒 Gradient Clipping for successor_net
+                torch.nn.utils.clip_grad_norm_(successor_net.parameters(), max_norm=50)
+
                 optimizer_s.step()
 
             
