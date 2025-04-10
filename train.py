@@ -7,6 +7,13 @@ from tqdm import tqdm
 from feature_net import FeatureNetwork
 from successor_net import SuccessorNetwork
 from replay_buffer import ReplayBuffer
+from intrinsic_reward_predictor import IntrinsicRewardPredictor
+
+def weights_init_kaiming(m):
+    if isinstance(m, nn.Linear):
+        nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -23,7 +30,7 @@ batch_size = 128  # Increased for batch efficiency
 # Epsilon-Greedy Parameters
 epsilon = 1.0
 epsilon_min = 0.1
-epsilon_decay = 0.99942
+epsilon_decay = 0.999744
 
 # Load environment
 env = gym.make("Reacher-v5")
@@ -31,10 +38,15 @@ state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
 max_steps = env.spec.max_episode_steps
 
-# Initialize networks
 feature_net = FeatureNetwork(state_dim, feature_dim).to(device)
 successor_net = SuccessorNetwork(feature_dim, action_dim).to(device)
-w = nn.Parameter(torch.randn(feature_dim, device=device, requires_grad=True))  # Trainable reward weights
+intrinsic_reward_net = IntrinsicRewardPredictor(feature_dim, state_dim).to(device)
+
+# Recommended: Kaiming Uniform Init for trainable reward weights
+w = nn.Parameter(torch.empty(feature_dim, device=device))
+nn.init.kaiming_uniform_(w.unsqueeze(0), nonlinearity='relu')
+w.requires_grad_()
+
 
 # Target network
 successor_net_prev = SuccessorNetwork(feature_dim, action_dim).to(device)
@@ -42,8 +54,9 @@ successor_net_prev.load_state_dict(successor_net.state_dict())
 successor_net_prev.eval()
 
 # Optimizers (Only Using Momentum)
-optimizer_f = optim.SGD(feature_net.parameters(), lr=lr, momentum=momentum)
-optimizer_s = optim.SGD(successor_net.parameters(), lr=lr, momentum=momentum)
+optimizer_theta = optim.SGD(feature_net.parameters(), lr=lr, momentum=momentum)
+optimizer_alpha = optim.SGD(successor_net.parameters(), lr=lr, momentum=momentum)
+optimizer_theta_tilde = optim.SGD(intrinsic_reward_net.parameters(), lr=lr, momentum=momentum)
 optimizer_w = optim.SGD([w], lr=lr, momentum=momentum)
 
 # Replay Buffer
@@ -116,34 +129,49 @@ for epoch in range(epochs):
 
                 # Compute reward loss efficiently
                 reward_pred_batch = (phi_s_batch @ w).squeeze()
-                reward_loss = ((batch_rewards - reward_pred_batch) ** 2).mean()
+                l_r = ((batch_rewards - reward_pred_batch) ** 2).mean()
+
+                # phi_s_batch: (batch_size, feature_dim)
+                # batch_states: (batch_size, state_dim)
+                reconstructed_states = intrinsic_reward_net(phi_s_batch)
+
+                # Loss: mean squared error between reconstructed and actual state
+                l_a = ((reconstructed_states - batch_states) ** 2).mean()
                 
+                reward_loss = l_r + l_a
                 # Prevent NaNs/Infs
+                if torch.isnan(l_r) or torch.isinf(l_r):
+                    print("❌ Skipping l_r due to instability")
+                    continue
+                if torch.isnan(l_a) or torch.isinf(l_a):
+                    print("❌ Skipping l_a due to instability")
+                    continue
                 if torch.isnan(reward_loss) or torch.isinf(reward_loss):
                     print("❌ Skipping reward_loss due to instability")
                     continue
                 # === Step 1: Optimize reward prediction loss (only w and feature_net) ===
-                # optimizer_f.zero_grad()
+                # optimizer_theta.zero_grad()
                 # optimizer_w.zero_grad()
 
-                # reward_loss.backward()
-                # optimizer_f.step()
+                # l_r.backward()
+                # optimizer_theta.step()
                 # optimizer_w.step()
-                optimizer_f.zero_grad()
+                optimizer_theta.zero_grad()
                 optimizer_w.zero_grad()
-
+                optimizer_theta_tilde.zero_grad()
                 reward_loss.backward()
 
                 # 🔒 Gradient Clipping for feature_net and w
                 torch.nn.utils.clip_grad_norm_(feature_net.parameters(), max_norm=50)
+                torch.nn.utils.clip_grad_norm_(intrinsic_reward_net.parameters(), max_norm=50)
                 torch.nn.utils.clip_grad_norm_([w], max_norm=50)
 
-                optimizer_f.step()
+                optimizer_theta.step()
                 optimizer_w.step()
-
+                optimizer_theta_tilde.step()
 
                 # # === Step 2: Optimize successor representation loss (only successor_net) ===
-                # optimizer_s.zero_grad()
+                # optimizer_alpha.zero_grad()
 
                 # # Detach w and phi_s_batch to prevent backprop into them
                 # phi_s_batch_detached = phi_s_batch.detach()
@@ -154,8 +182,8 @@ for epoch in range(epochs):
                 # loss_sr = ((target_M - m_sa_batch) ** 2).mean()
 
                 # loss_sr.backward()
-                # optimizer_s.step()
-                optimizer_s.zero_grad()
+                # optimizer_alpha.step()
+                optimizer_alpha.zero_grad()
 
                 # Detach w and phi_s_batch to prevent backprop into them
                 phi_s_batch_detached = phi_s_batch.detach()
@@ -174,7 +202,7 @@ for epoch in range(epochs):
                 # 🔒 Gradient Clipping for successor_net
                 torch.nn.utils.clip_grad_norm_(successor_net.parameters(), max_norm=50)
 
-                optimizer_s.step()
+                optimizer_alpha.step()
 
             
             state = next_state
@@ -237,8 +265,8 @@ env.close()
 # successor_net_prev.eval()
 
 # # Optimizers
-# optimizer_f = optim.SGD(feature_net.parameters(), lr=lr, momentum=momentum)
-# optimizer_s = optim.SGD(successor_net.parameters(), lr=lr, momentum=momentum)
+# optimizer_theta = optim.SGD(feature_net.parameters(), lr=lr, momentum=momentum)
+# optimizer_alpha = optim.SGD(successor_net.parameters(), lr=lr, momentum=momentum)
 # optimizer_w = optim.SGD([w], lr=lr, momentum=momentum)
 
 # # Replay Buffer
@@ -330,17 +358,17 @@ env.close()
 #                 reward_pred_batch = torch.zeros(batch_size, device=device)
 #                 for i in range(batch_size):
 #                     reward_pred_batch[i] = (phi_s_batch[i] @ w).item()
-#                 reward_loss = ((batch_rewards - reward_pred_batch) ** 2).mean()
+#                 l_r = ((batch_rewards - reward_pred_batch) ** 2).mean()
                 
-#                 optimizer_f.zero_grad()
-#                 optimizer_s.zero_grad()
+#                 optimizer_theta.zero_grad()
+#                 optimizer_alpha.zero_grad()
 #                 optimizer_w.zero_grad()
                 
 #                 loss_sr.backward(retain_graph=True)
-#                 reward_loss.backward()
+#                 l_r.backward()
                 
-#                 optimizer_f.step()
-#                 optimizer_s.step()
+#                 optimizer_theta.step()
+#                 optimizer_alpha.step()
 #                 optimizer_w.step()
             
 #             state = next_state
