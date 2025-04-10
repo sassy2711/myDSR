@@ -118,6 +118,10 @@ for epoch in range(epochs):
                 reward_pred_batch = (phi_s_batch @ w).squeeze()
                 reward_loss = ((batch_rewards - reward_pred_batch) ** 2).mean()
                 
+                # Prevent NaNs/Infs
+                if torch.isnan(reward_loss) or torch.isinf(reward_loss):
+                    print("❌ Skipping reward_loss due to instability")
+                    continue
                 # === Step 1: Optimize reward prediction loss (only w and feature_net) ===
                 # optimizer_f.zero_grad()
                 # optimizer_w.zero_grad()
@@ -160,6 +164,10 @@ for epoch in range(epochs):
 
                 m_sa_batch = successor_net(phi_s_batch_detached, batch_actions)
                 loss_sr = ((target_M - m_sa_batch) ** 2).mean()
+
+                if torch.isnan(loss_sr) or torch.isinf(loss_sr):
+                    print("❌ Skipping loss_sr due to instability")
+                    continue
 
                 loss_sr.backward()
 
