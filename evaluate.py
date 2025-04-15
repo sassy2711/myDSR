@@ -33,7 +33,7 @@ num_action_samples = 10
 
 # Load learned reward weight vector
 w = torch.load("w.pth", map_location=device, weights_only=True)
-print("w stats:", w.min(), w.max(), torch.isnan(w).any(), torch.isinf(w).any())
+#print("w stats:", w.min(), w.max(), torch.isnan(w).any(), torch.isinf(w).any())
 
 for episode in range(num_episodes):
     state, info = env.reset()
@@ -57,11 +57,12 @@ for episode in range(num_episodes):
         for i in sampled_actions:
             a = i.unsqueeze(0)
             m_s_a = successor_net(phi_s, a)
-            print("m_s_a stats:", torch.isnan(m_s_a).any(), torch.isinf(m_s_a).any())
+            # print("m_s_a stats:", torch.isnan(m_s_a).any(), torch.isinf(m_s_a).any())
             q_value = m_s_a @ w  # ✅ Use the learned weight vector
-            print(q_value)
+            print(q_value.shape)
+            print(m_s_a.shape)
             if q_value > max_q_value:
-                print(1)
+                #print(1)
                 max_q_value = q_value
                 best_action = a
 
