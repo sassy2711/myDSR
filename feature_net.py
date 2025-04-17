@@ -37,6 +37,7 @@ class FeatureNetwork(nn.Module):
         super().__init__()
         self.fc = nn.Sequential(
             nn.Linear(state_dim, 128),
+            nn.LayerNorm(128),   # 🔹 LayerNorm after first linear
             nn.ReLU(),
             nn.Linear(128, feature_dim)
         )

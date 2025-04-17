@@ -69,8 +69,8 @@ class SuccessorNetwork(nn.Module):
         super(SuccessorNetwork, self).__init__()
         # The input to this network will be the feature_dim (phi_s) + one-hot encoded action (action_dim)
         self.fc1 = nn.Linear(feature_dim + action_dim, 128)
+        self.ln1 = nn.LayerNorm(128)
         self.fc2 = nn.Linear(128, feature_dim)  # Output dimension is same as feature_dim
-        
         self._init_weights()
 
     def _init_weights(self):
@@ -89,5 +89,5 @@ class SuccessorNetwork(nn.Module):
         """
         # Concatenate the state feature and one-hot encoded action
         x = torch.cat([phi_s, action], dim=-1)  # Concatenate along the last dimension
-        x = torch.relu(self.fc1(x))  # First fully connected layer with ReLU activation
+        x = torch.relu(self.ln1(self.fc1(x)))               # LayerNorm after fc1
         return self.fc2(x)  # Output the transformed feature representation

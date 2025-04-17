@@ -249,7 +249,7 @@ batch_size = 64
 # Epsilon-Greedy Parameters
 epsilon = 1.0
 epsilon_min = 0.05
-epsilon_decay = 0.9995
+epsilon_decay = 0.997
 
 # Learning Rates
 lr_theta = 1e-4
@@ -258,7 +258,7 @@ lr_tilde = 1e-4
 lr_w = 5e-5
 
 # Load environment
-#env = gym.make("LunarLander-v3")
+env = gym.make("LunarLander-v3")
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 max_steps = 800
@@ -285,13 +285,17 @@ optimizer_theta_tilde = optim.SGD(intrinsic_reward_net.parameters(), lr=lr_tilde
 optimizer_w = optim.SGD([w], lr=lr_w, momentum=0.95)
 
 # Replay Buffer
-buffer_capacity = int(5e5)
+buffer_capacity = int(3e4)
 replay_buffer = ReplayBuffer(buffer_capacity)
 
 # One-hot encoding
 def one_hot(actions, num_classes):
     return torch.eye(num_classes, device=actions.device)[actions]
 
+def soft_update(target_net, source_net, tau=0.005):
+    for target_param, param in zip(target_net.parameters(), source_net.parameters()):
+        target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+#print(w.shape)
 # Training loop
 for epoch in range(epochs):
     if hasattr(env, 'close'):
@@ -312,8 +316,7 @@ for epoch in range(epochs):
     epoch_l_a = []
     epoch_loss_sr = []
 
-    if epoch % 5 == 0:
-        successor_net_prev.load_state_dict(successor_net.state_dict())
+    soft_update(successor_net_prev, successor_net, tau=0.005)
 
     state, _ = env.reset()
     state = torch.tensor(np.array(state), dtype=torch.float32, device=device).unsqueeze(0)
@@ -329,6 +332,7 @@ for epoch in range(epochs):
 
             # Epsilon-greedy action selection
             with torch.no_grad():
+                #print("Epsilon: ", epsilon)
                 if np.random.rand() < epsilon:
                     action = np.random.randint(0, action_dim)
                 else:
@@ -337,6 +341,12 @@ for epoch in range(epochs):
                     m_s_a = successor_net_prev(phi_s_exp, action_candidates)
                     q_values = (m_s_a @ w).squeeze(-1)
                     action = q_values.argmax().item()
+                    # print(m_s_a.shape)
+                    # print(q_values.shape)
+                    # print(action_candidates.shape)
+                    # print(phi_s_exp.shape)
+                    # print(phi_s.shape)
+                    #print(action.shape)
 
             next_state, reward, terminated, truncated, _ = env.step(action)
             reward /= 100.0  # Reward scaling
@@ -351,16 +361,25 @@ for epoch in range(epochs):
                 batch_states = batch_states.squeeze(1)
                 phi_s_batch = feature_net(batch_states).squeeze(1)
                 phi_next_s_batch = feature_net(batch_next_states).squeeze(1)
-                    
                 batch_actions_oh = one_hot(batch_actions.squeeze(-1).long(), action_dim)
 
                 with torch.no_grad():
                     action_candidates = one_hot(torch.arange(action_dim, device=device), action_dim).float()
-                    phi_next_exp = phi_next_s_batch.unsqueeze(1).expand(-1, action_dim, -1)
-                    action_exp = action_candidates.unsqueeze(0).expand(batch_size, -1, -1)
-                    m_sDash_a = successor_net_prev(phi_next_exp, action_exp)
-                    q_values = (m_sDash_a @ w).squeeze(-1)
-                    best_m_sDash_a = m_sDash_a[torch.arange(batch_size), q_values.argmax(dim=1)]
+                    phi_next_exp = phi_next_s_batch.unsqueeze(1).expand(-1, action_dim, -1)  # [B, A, F]
+                    action_exp = action_candidates.unsqueeze(0).expand(batch_size, -1, -1)   # [B, A, A_dim]
+
+                    # 🔄 Flatten inputs
+                    B, A, F = phi_next_exp.shape
+                    _, _, A_dim = action_exp.shape
+                    phi_next_exp_flat = phi_next_exp.reshape(B * A, F)       # [B*A, F]
+                    action_exp_flat = action_exp.reshape(B * A, A_dim)       # [B*A, A_dim]
+
+                    # Run network and reshape back
+                    m_sDash_a_flat = successor_net_prev(phi_next_exp_flat, action_exp_flat)  # [B*A, F]
+                    m_sDash_a = m_sDash_a_flat.view(B, A, F)                                 # 🔙 [B, A, F]
+
+                    q_values = (m_sDash_a @ w).squeeze(-1)                                   # [B, A]
+                    best_m_sDash_a = m_sDash_a[torch.arange(batch_size), q_values.argmax(dim=1)]  # [B, F]
 
                 reward_pred_batch = (phi_s_batch @ w).unsqueeze(-1)
                 l_r = ((batch_rewards.squeeze(-1) - reward_pred_batch) ** 2).mean()
@@ -403,6 +422,7 @@ for epoch in range(epochs):
                 loss_sr.backward()
                 torch.nn.utils.clip_grad_norm_(successor_net.parameters(), max_norm=50)
                 optimizer_alpha.step()
+
 
             state = next_state
             total_reward += reward * 100.0  # Scale reward back for logging
