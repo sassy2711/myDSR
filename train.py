@@ -223,6 +223,12 @@ from feature_net import FeatureNetwork  # Ensure feature_net uses smaller archit
 from successor_net import SuccessorNetwork
 from replay_buffer import ReplayBuffer
 from intrinsic_reward_predictor import IntrinsicRewardPredictor
+import os
+
+video_folder = './videos'
+os.makedirs(video_folder, exist_ok=True)
+record_interval = 50  # Record every 50 epochs
+
 
 def weights_init_kaiming(m):
     if isinstance(m, nn.Linear):
@@ -252,7 +258,7 @@ lr_tilde = 1e-4
 lr_w = 5e-5
 
 # Load environment
-env = gym.make("LunarLander-v3")
+#env = gym.make("LunarLander-v3")
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 max_steps = 800
@@ -288,6 +294,20 @@ def one_hot(actions, num_classes):
 
 # Training loop
 for epoch in range(epochs):
+    if hasattr(env, 'close'):
+        env.close()
+
+    if epoch % record_interval == 0:
+        env = gym.make("LunarLander-v3", render_mode="rgb_array")
+        env = gym.wrappers.RecordVideo(
+            env,
+            video_folder,
+            episode_trigger=lambda episode_id: episode_id == 0,
+            name_prefix=f"epoch_{epoch}"
+        )
+    else:
+        env = gym.make("LunarLander-v3")
+
     epoch_l_r = []
     epoch_l_a = []
     epoch_loss_sr = []
