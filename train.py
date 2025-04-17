@@ -381,11 +381,33 @@ for epoch in range(epochs):
                     q_values = (m_sDash_a @ w).squeeze(-1)                                   # [B, A]
                     best_m_sDash_a = m_sDash_a[torch.arange(batch_size), q_values.argmax(dim=1)]  # [B, F]
 
-                reward_pred_batch = (phi_s_batch @ w).unsqueeze(-1)
-                l_r = ((batch_rewards.squeeze(-1) - reward_pred_batch) ** 2).mean()
+                # reward_pred_batch = (phi_s_batch @ w).unsqueeze(-1)
+                # l_r = ((batch_rewards.squeeze(-1) - reward_pred_batch) ** 2).mean()
 
-                reconstructed_states = intrinsic_reward_net(phi_s_batch)
+                # reconstructed_states = intrinsic_reward_net(phi_s_batch)
+                # l_a = ((reconstructed_states - batch_states.squeeze(1)) ** 2).mean()
+
+                # 🧠 Reward prediction loss
+                reward_pred_batch = (phi_s_batch @ w).unsqueeze(-1)  # [B, 1]
+                print(f"phi_s_batch: {phi_s_batch.shape}")           # [B, feature_dim]
+                print(f"w: {w.shape}")                               # [feature_dim, 1]
+                print(f"reward_pred_batch: {reward_pred_batch.shape}")
+                print(f"reward_pred_batch sample: {reward_pred_batch[:5].squeeze(-1)}")
+                print(f"batch_rewards: {batch_rewards.shape}")
+                print(f"batch_rewards sample: {batch_rewards[:5].squeeze(-1)}")
+
+                l_r = ((batch_rewards.squeeze(-1) - reward_pred_batch) ** 2).mean()
+                print(f"l_r (reward loss): {l_r.item():.6f}")
+
+                # 🔁 Auxiliary loss: reconstructing original state
+                reconstructed_states = intrinsic_reward_net(phi_s_batch)  # [B, state_dim]
+                print(f"reconstructed_states: {reconstructed_states.shape}")
+                print(f"batch_states: {batch_states.shape}")
+                print(f"batch_states (after squeeze): {batch_states.squeeze(1).shape}")
+
                 l_a = ((reconstructed_states - batch_states.squeeze(1)) ** 2).mean()
+                print(f"l_a (auxiliary loss): {l_a.item():.6f}")
+
 
                 epoch_l_r.append(l_r.item())
                 epoch_l_a.append(l_a.item())
