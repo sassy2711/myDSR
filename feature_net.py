@@ -5,9 +5,9 @@
 # #     def __init__(self, state_dim, feature_dim):
 # #         super().__init__()
 # #         self.fc = nn.Sequential(
-# #             nn.Linear(state_dim, 256),
+# #             nn.Linear(state_dim, 128),
 # #             nn.ReLU(),
-# #             nn.Linear(256, feature_dim)
+# #             nn.Linear(128, feature_dim)
 # #         )
 
 # #     def forward(self, state):
@@ -20,10 +20,10 @@
 #     def __init__(self, state_dim, feature_dim):
 #         super().__init__()
 #         self.fc = nn.Sequential(
-#             nn.Linear(state_dim, 256),
-#             nn.LayerNorm(256),  # LayerNorm added here
+#             nn.Linear(state_dim, 128),
+#             nn.LayerNorm(128),  # LayerNorm added here
 #             nn.ReLU(),
-#             nn.Linear(256, feature_dim)
+#             nn.Linear(128, feature_dim)
 #         )
 
 #     def forward(self, state):
@@ -36,9 +36,9 @@ class FeatureNetwork(nn.Module):
     def __init__(self, state_dim, feature_dim):
         super().__init__()
         self.fc = nn.Sequential(
-            nn.Linear(state_dim, 256),
+            nn.Linear(state_dim, 128),
             nn.ReLU(),
-            nn.Linear(256, feature_dim)
+            nn.Linear(128, feature_dim)
         )
         
         self._init_weights()
