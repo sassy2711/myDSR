@@ -26,17 +26,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # Hyperparameters
-gamma = 0.99
-epochs = 2500
+gamma = 0.98
+epochs = 4000
 feature_dim = 128
 num_action_samples = 4  # All possible discrete actions
 batch_size = 128
-epsilon_decay_steps = 2000  # number of epochs over which to linearly decay
+epsilon_decay_steps = 3500  # number of epochs over which to linearly decay
 
 # Epsilon-Greedy Parameters
 epsilon = 1.0
 epsilon_min = 0.05
-epsilon_decay = 0.997
+epsilon_decay = 0.999
 
 # Learning Rates
 lr_theta = 1e-3
@@ -45,10 +45,10 @@ lr_tilde = 1e-4
 lr_w = 5e-5
 
 # Load environment
-env = gym.make("CartPole-v1")
+env = gym.make("MountainCar-v0")
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
-max_steps = 800
+max_steps = 200
 hard_update_interval = 10
 # Networks
 feature_net = FeatureNetwork(state_dim, feature_dim).to(device)
@@ -104,7 +104,7 @@ for epoch in range(epochs):
         env.close()
 
     if epoch % record_interval == 0:
-        env = gym.make("CartPole-v1", render_mode="rgb_array")
+        env = gym.make("MountainCar-v0", render_mode="rgb_array")
         env = gym.wrappers.RecordVideo(
             env,
             video_folder,
@@ -112,7 +112,7 @@ for epoch in range(epochs):
             name_prefix=f"epoch_{epoch}"
         )
     else:
-        env = gym.make("CartPole-v1")
+        env = gym.make("MountainCar-v0")
 
     epoch_l_r = []
     epoch_l_a = []
