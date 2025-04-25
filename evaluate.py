@@ -4,6 +4,7 @@ import numpy as np
 import os
 from reward_net import RewardNetwork
 from successor_net import SuccessorNetwork
+from feature_net import FeatureNetwork
 
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -24,12 +25,17 @@ env.close()
 feature_dim = 128
 
 # Load trained models
-reward_net = RewardNetwork(state_dim).to(device)
+#reward_net = RewardNetwork(state_dim).to(device)
+feature_net = FeatureNetwork(state_dim, feature_dim).to(device)
 successor_net = SuccessorNetwork(feature_dim, action_dim).to(device)
-reward_net.load_state_dict(torch.load("reward_net.pth", map_location=device))
+#reward_net.load_state_dict(torch.load("reward_net.pth", map_location=device))
 successor_net.load_state_dict(torch.load("successor_net.pth", map_location=device))
-reward_net.eval()
+feature_net.load_state_dict(torch.load("feature_net.pth", map_location=device))
+feature_net.eval()
 successor_net.eval()
+# Load learned reward weight vector
+w = torch.load("w.pth", map_location=device)  # shape: [feature_dim]
+w = w.to(device)  # just to ensure it's on the right device
 
 # # Load learned reward weight vector
 # w = torch.load("w.pth", map_location=device)  # shape: [feature_dim]
@@ -58,7 +64,8 @@ for episode in range(num_episodes):
     while not (terminated or truncated):
         # Get reward features
         with torch.no_grad():
-            _, phi_s, w = reward_net(state)
+            #_, phi_s, w = reward_net(state)
+            phi_s = feature_net(state)
 
             # Evaluate Q-values for all discrete actions
             action_candidates = torch.eye(action_dim, device=device)

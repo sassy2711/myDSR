@@ -9,7 +9,7 @@ from successor_net import SuccessorNetwork
 from replay_buffer import ReplayBuffer
 from intrinsic_reward_predictor import IntrinsicRewardPredictor
 import os
-from reward_net import RewardNetwork
+#from reward_net import RewardNetwork
 
 video_folder = './videos'
 os.makedirs(video_folder, exist_ok=True)
@@ -51,15 +51,15 @@ action_dim = env.action_space.n
 max_steps = 800
 hard_update_interval = 10
 # Networks
-#feature_net = FeatureNetwork(state_dim, feature_dim).to(device)
-reward_net = RewardNetwork(state_dim).to(device)
+feature_net = FeatureNetwork(state_dim, feature_dim).to(device)
+#reward_net = RewardNetwork(state_dim).to(device)
 successor_net = SuccessorNetwork(feature_dim, action_dim).to(device)
-#intrinsic_reward_net = IntrinsicRewardPredictor(feature_dim, state_dim).to(device)
+intrinsic_reward_net = IntrinsicRewardPredictor(feature_dim, state_dim).to(device)
 
-# # Reward weight vector
-# w = nn.Parameter(torch.empty(feature_dim, device=device))
-# nn.init.kaiming_uniform_(w.unsqueeze(0), nonlinearity='relu')
-# w.requires_grad_()
+# Reward weight vector
+w = nn.Parameter(torch.empty(feature_dim, device=device))
+nn.init.kaiming_uniform_(w.unsqueeze(0), nonlinearity='relu')
+w.requires_grad_()
 
 # Target network
 successor_net_prev = SuccessorNetwork(feature_dim, action_dim).to(device)
@@ -67,13 +67,13 @@ successor_net_prev.load_state_dict(successor_net.state_dict())
 successor_net_prev.eval()
 
 # Optimizers
-#optimizer_theta = optim.SGD(feature_net.parameters(), lr=lr_theta, momentum=0.95)
-# optimizer_reward = optim.SGD(reward_net.parameters(), lr=lr_theta, momentum=0.95)
-# optimizer_alpha = optim.SGD(successor_net.parameters(), lr=lr_alpha, momentum=0.95)
-# optimizer_theta_tilde = optim.SGD(intrinsic_reward_net.parameters(), lr=lr_tilde, momentum=0.95)
-# optimizer_w = optim.SGD([w], lr=lr_w, momentum=0.95)
-optimizer_reward = optim.Adam(reward_net.parameters(), lr=lr_theta)
-optimizer_alpha = optim.Adam(successor_net.parameters(), lr=lr_alpha)
+optimizer_theta = optim.SGD(feature_net.parameters(), lr=lr_theta, momentum=0.95)
+#optimizer_reward = optim.SGD(reward_net.parameters(), lr=lr_theta, momentum=0.95)
+optimizer_alpha = optim.SGD(successor_net.parameters(), lr=lr_alpha, momentum=0.95)
+optimizer_theta_tilde = optim.SGD(intrinsic_reward_net.parameters(), lr=lr_tilde, momentum=0.95)
+optimizer_w = optim.SGD([w], lr=lr_w, momentum=0.95)
+# optimizer_reward = optim.Adam(reward_net.parameters(), lr=lr_theta)
+# optimizer_alpha = optim.Adam(successor_net.parameters(), lr=lr_alpha)
 
 # Replay Buffer
 buffer_capacity = 10000
@@ -115,7 +115,7 @@ for epoch in range(epochs):
         env = gym.make("CartPole-v1")
 
     epoch_l_r = []
-    #epoch_l_a = []
+    epoch_l_a = []
     epoch_loss_sr = []
 
     #soft_update(successor_net_prev, successor_net, tau=0.01)
@@ -133,7 +133,8 @@ for epoch in range(epochs):
             if terminated or truncated:
                 break
 
-            r_s, phi_s, w = reward_net(state)
+            #r_s, phi_s, w = reward_net(state)
+            phi_s = feature_net(state)
             phi_s = phi_s.detach()
             w = w.detach()  # ⛔ Detach after forward to avoid implicit autograd tracking
 
@@ -175,19 +176,36 @@ for epoch in range(epochs):
             if len(replay_buffer) >= batch_size:
                 batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones = replay_buffer.sample(batch_size)
                 batch_states = batch_states.squeeze(1)
+                batch_next_states = batch_next_states.squeeze(1)
+                phi_s_batch = feature_net(batch_states)
+                reconstructed_states = intrinsic_reward_net(phi_s_batch)
                 #print(batch_states.shape)
                 # ======== REWARD PHASE ========
-                reward_pred_batch, _, _ = reward_net(batch_states)  # Only use reward prediction here
+                #reward_pred_batch, _, _ = reward_net(batch_states)  # Only use reward prediction here
+                reward_pred_batch = phi_s_batch @ w
                 #print(batch_rewards.shape)
-                reward_loss = ((batch_rewards - reward_pred_batch) ** 2).mean()
-                epoch_l_r.append(reward_loss.item())
+                l_r = ((batch_rewards - reward_pred_batch) ** 2).mean()
+                l_a = ((reconstructed_states - batch_states) ** 2).mean()
+                epoch_l_r.append(l_r.item())
+                epoch_l_a.append(l_a.item())
+                reward_loss = l_r + l_a
 
                 if torch.isnan(reward_loss) or torch.isinf(reward_loss):
                     print("❌ Skipping reward_loss due to instability")
                 else:
-                    optimizer_reward.zero_grad()
+                    optimizer_theta.zero_grad()
                     optimizer_alpha.zero_grad()
+                    optimizer_theta_tilde.zero_grad()
+                    optimizer_w.zero_grad()
                     reward_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(intrinsic_reward_net.parameters(), max_norm=50)
+                    torch.nn.utils.clip_grad_norm_(feature_net.parameters(), max_norm=50)
+                    torch.nn.utils.clip_grad_norm_(w, max_norm=50)
+                    optimizer_theta.step()
+                    optimizer_theta_tilde.step()
+                    optimizer_w.step()
+                    # phi_s = phi_s.detach()
+                    # reward_loss = reward_loss.detach()
                     # # 🧪 Debug: Check gradients
                     # print("\n🔍 Checking gradients after reward_loss.backward():")
                     # for name, param in reward_net.named_parameters():
@@ -200,16 +218,15 @@ for epoch in range(epochs):
                     #     if param.grad is not None:
                     #         print(f"❌ WARNING: successor_net param '{name}' has grad after reward_loss.backward()! Mean: {param.grad.abs().mean():.6f}")
                     #reward_pred_batch = reward_pred_batch.detach()  # Ensure it's not involved in any unwanted autograd
-                    reward_loss = reward_loss.detach()
-                    #check_requires_grad(reward_net, "RewardNet")
-                    torch.nn.utils.clip_grad_norm_(reward_net.parameters(), max_norm=50)
-                    optimizer_reward.step()
 
+                    #check_requires_grad(reward_net, "RewardNet")
+                    
                 # ======== SR PHASE (completely detached from reward_net) ========
                 with torch.no_grad():
-                    _, phi_s_batch, w = reward_net(batch_states)
-                    _, phi_next_s_batch, _ = reward_net(batch_next_states.squeeze(1))
+                    phi_s_batch = feature_net(batch_states)
+                    phi_next_s_batch = feature_net(batch_next_states)
                 # print(phi_s_batch.shape)
+                # print(phi_next_s_batch.shape)
                 # print(w.shape)
                 # ⛔ Detach reward outputs to sever gradient flow
                 phi_s_batch = phi_s_batch.detach()
@@ -217,6 +234,7 @@ for epoch in range(epochs):
                 w = w.detach()
 
                 batch_actions_oh = one_hot(batch_actions.squeeze(-1).long(), action_dim)
+                batch_actions_oh = batch_actions_oh.detach()
                 batch_dones = batch_dones.float().detach()
 
                 # Compute target successor representation
@@ -244,7 +262,9 @@ for epoch in range(epochs):
                     print("❌ Skipping loss_sr due to instability")
                 else:
                     optimizer_alpha.zero_grad()
-                    optimizer_reward.zero_grad()
+                    optimizer_theta.zero_grad()
+                    optimizer_theta_tilde.zero_grad()
+                    optimizer_w.zero_grad()
                     loss_sr.backward()
                     # # 🧪 Debug: Check gradients again
                     # print("\n🔍 Checking gradients after loss_sr.backward():")
@@ -270,11 +290,11 @@ for epoch in range(epochs):
             pbar.update(1)
 
     avg_l_r = np.mean(epoch_l_r) if epoch_l_r else float('nan')
-    #avg_l_a = np.mean(epoch_l_a) if epoch_l_a else float('nan')
+    avg_l_a = np.mean(epoch_l_a) if epoch_l_a else float('nan')
     avg_loss_sr = np.mean(epoch_loss_sr) if epoch_loss_sr else float('nan')
 
     print(f"✅ Epoch {epoch+1}/{epochs} | Total Reward: {total_reward:.2f} | "
-          f"Loss_r: {avg_l_r:.4f} | Loss_SR: {avg_loss_sr:.4f}")
+          f"Loss_r: {avg_l_r:.4f} | "f"Loss_a: {avg_l_a:.4f} | Loss_SR: {avg_loss_sr:.4f}")
     #print(f"🔁 Steps this epoch: {step + 1}")
 
     #epsilon = max(epsilon_min, epsilon * epsilon_decay)
@@ -282,11 +302,11 @@ for epoch in range(epochs):
 
 
 # Save models
-# torch.save(feature_net.state_dict(), "feature_net.pth")
-torch.save(reward_net.state_dict(), "reward_net.pth")
+torch.save(feature_net.state_dict(), "feature_net.pth")
+#torch.save(reward_net.state_dict(), "reward_net.pth")
 torch.save(successor_net.state_dict(), "successor_net.pth")
-# torch.save(intrinsic_reward_net.state_dict(), "intrinsic_reward_net.pth")
-# torch.save(w.detach().cpu(), "w.pth")
+torch.save(intrinsic_reward_net.state_dict(), "intrinsic_reward_net.pth")
+torch.save(w.detach().cpu(), "w.pth")
 env.close()
 
 
