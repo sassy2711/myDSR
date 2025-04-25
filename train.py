@@ -10,6 +10,7 @@ from replay_buffer import ReplayBuffer
 from intrinsic_reward_predictor import IntrinsicRewardPredictor
 import os
 #from reward_net import RewardNetwork
+# import tensorflow as tf
 
 video_folder = './videos'
 os.makedirs(video_folder, exist_ok=True)
@@ -25,13 +26,22 @@ def weights_init_kaiming(m):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+# gpus = tf.config.list_physical_devices('GPU')       # Setting up GPU
+# if gpus:
+#     try:
+#         tf.config.experimental.set_memory_growth(gpus[0], True)
+#         tf.config.set_visible_devices(gpus[0], 'GPU')
+#         print("GPU is now being used!")
+#     except RuntimeError as e:
+#         print(e)
+
 # Hyperparameters
 gamma = 0.98
-epochs = 4000
+epochs = 15000
 feature_dim = 128
 num_action_samples = 4  # All possible discrete actions
 batch_size = 128
-epsilon_decay_steps = 3500  # number of epochs over which to linearly decay
+epsilon_decay_steps = 14000  # number of epochs over which to linearly decay
 
 # Epsilon-Greedy Parameters
 epsilon = 1.0
@@ -76,7 +86,7 @@ optimizer_w = optim.SGD([w], lr=lr_w, momentum=0.95)
 # optimizer_alpha = optim.Adam(successor_net.parameters(), lr=lr_alpha)
 
 # Replay Buffer
-buffer_capacity = 10000
+buffer_capacity = 100000
 replay_buffer = ReplayBuffer(buffer_capacity)
 
 # One-hot encoding
