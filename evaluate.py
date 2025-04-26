@@ -16,7 +16,7 @@ os.makedirs(video_folder, exist_ok=True)
 record_interval = 10  # Record every 50 episodes
 
 # Load environment to get state/action space
-env = gym.make("CartPole-v1")
+env = gym.make("MountainCar-v0")
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 env.close()
@@ -45,7 +45,7 @@ num_episodes = 100
 
 for episode in range(num_episodes):
     if episode % record_interval == 0:
-        env = gym.make("CartPole-v1", render_mode="rgb_array")
+        env = gym.make("MountainCar-v0", render_mode="rgb_array")
         env = gym.wrappers.RecordVideo(
             env,
             video_folder,
@@ -53,7 +53,7 @@ for episode in range(num_episodes):
             name_prefix=f"eval_ep_{episode}"
         )
     else:
-        env = gym.make("CartPole-v1")
+        env = gym.make("MountainCar-v0")
 
     state, _ = env.reset()
     state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)

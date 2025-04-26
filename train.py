@@ -37,11 +37,11 @@ print(f"Using device: {device}")
 
 # Hyperparameters
 gamma = 0.98
-epochs = 15000
+epochs = 30000
 feature_dim = 128
 num_action_samples = 4  # All possible discrete actions
 batch_size = 128
-epsilon_decay_steps = 14000  # number of epochs over which to linearly decay
+epsilon_decay_steps = 29000  # number of epochs over which to linearly decay
 
 # Epsilon-Greedy Parameters
 epsilon = 1.0
@@ -86,7 +86,7 @@ optimizer_w = optim.SGD([w], lr=lr_w, momentum=0.95)
 # optimizer_alpha = optim.Adam(successor_net.parameters(), lr=lr_alpha)
 
 # Replay Buffer
-buffer_capacity = 100000
+buffer_capacity = int(1e5)
 replay_buffer = ReplayBuffer(buffer_capacity)
 
 # One-hot encoding
