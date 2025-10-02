@@ -11,6 +11,7 @@ from intrinsic_reward_predictor import IntrinsicRewardPredictor
 import os
 #from reward_net import RewardNetwork
 
+
 video_folder = './videos'
 os.makedirs(video_folder, exist_ok=True)
 record_interval = 50  # Record every 50 epochs
@@ -30,7 +31,7 @@ gamma = 0.99
 epochs = 2500
 feature_dim = 128
 num_action_samples = 4  # All possible discrete actions
-batch_size = 128
+batch_size = 64
 epsilon_decay_steps = 2000  # number of epochs over which to linearly decay
 
 # Epsilon-Greedy Parameters
@@ -204,6 +205,9 @@ for epoch in range(epochs):
                     optimizer_theta.step()
                     optimizer_theta_tilde.step()
                     optimizer_w.step()
+                    phi_s_batch = phi_s_batch.detach()
+                    reconstructed_states = reconstructed_states.detach()
+                    reward_pred_batch = reward_pred_batch.detach()
                     # phi_s = phi_s.detach()
                     # reward_loss = reward_loss.detach()
                     # # 🧪 Debug: Check gradients
@@ -220,6 +224,31 @@ for epoch in range(epochs):
                     #reward_pred_batch = reward_pred_batch.detach()  # Ensure it's not involved in any unwanted autograd
 
                     #check_requires_grad(reward_net, "RewardNet")
+
+                phi_s_batch = feature_net(batch_states)
+                phi_centered = phi_s_batch - phi_s_batch.mean(dim=0, keepdim=True)
+                cov = (phi_centered.T @ phi_centered) / (phi_centered.size(0) - 1)
+
+                I = torch.eye(cov.size(0), device=cov.device)
+                l_d = ((cov - I) ** 2).sum()
+                lambda_decor = 1e-3
+                decor_loss = l_d*lambda_decor
+
+                if torch.isnan(decor_loss) or torch.isinf(decor_loss):
+                    print("❌ Skipping reward_loss due to instability")
+                else:
+                    optimizer_theta.zero_grad()
+                    optimizer_alpha.zero_grad()
+                    optimizer_theta_tilde.zero_grad()
+                    optimizer_w.zero_grad()
+                    decor_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(intrinsic_reward_net.parameters(), max_norm=50)
+                    torch.nn.utils.clip_grad_norm_(feature_net.parameters(), max_norm=50)
+                    #torch.nn.utils.clip_grad_norm_(w, max_norm=50)
+                    optimizer_theta.step()
+                    optimizer_theta_tilde.step()
+                    phi_s_batch = phi_s_batch.detach()
+                    # optimizer_w.step()
                     
                 # ======== SR PHASE (completely detached from reward_net) ========
                 with torch.no_grad():
@@ -312,68 +341,3 @@ env.close()
 
 
 
-
-            # # Training step
-            # if len(replay_buffer) >= batch_size:
-            #     batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones = replay_buffer.sample(batch_size)
-            #     batch_states = batch_states.squeeze(1)
-            #     # phi_s_batch = feature_net(batch_states).squeeze(1)
-            #     # phi_next_s_batch = feature_net(batch_next_states).squeeze(1)
-            #     reward_pred_batch, phi_s_batch, w = reward_net(batch_states.squeeze(1))
-            #     reward_pred_next_batch, phi_next_s_batch, _ = reward_net(batch_next_states.squeeze(1))
-                
-            #     l_r = ((batch_rewards - reward_pred_batch) ** 2).mean()
-
-            #     epoch_l_r.append(l_r.item())
-            #     reward_loss = l_r
-            #     if torch.isnan(reward_loss) or torch.isinf(reward_loss):
-            #         print("❌ Skipping reward_loss due to instability")
-            #         continue
-            #     optimizer_reward.zero_grad()
-            #     reward_loss.backward()
-            #     torch.nn.utils.clip_grad_norm_(reward_net.parameters(), max_norm=50)
-            #     optimizer_reward.step()
-            #     # print(1)
-            #     # print(reward_pred_batch.shape)
-            #     # print(phi_s_batch.shape)
-            #     # print(w.shape)
-
-            #     _, phi_s_batch, w = reward_net(batch_states.squeeze(1))
-            #     _, phi_next_s_batch, _ = reward_net(batch_next_states.squeeze(1))
-
-            #     batch_actions_oh = one_hot(batch_actions.squeeze(-1).long(), action_dim)
-
-            #     with torch.no_grad():
-            #         action_candidates = one_hot(torch.arange(action_dim, device=device), action_dim).float()
-            #         phi_next_exp = phi_next_s_batch.unsqueeze(1).expand(-1, action_dim, -1)  # [B, A, F]
-            #         action_exp = action_candidates.unsqueeze(0).expand(batch_size, -1, -1)   # [B, A, A_dim]
-
-            #         # 🔄 Flatten inputs
-            #         B, A, F = phi_next_exp.shape
-            #         _, _, A_dim = action_exp.shape
-            #         phi_next_exp_flat = phi_next_exp.reshape(B * A, F)       # [B*A, F]
-            #         action_exp_flat = action_exp.reshape(B * A, A_dim)       # [B*A, A_dim]
-
-            #         # Run network and reshape back
-            #         m_sDash_a_flat = successor_net_prev(phi_next_exp_flat, action_exp_flat)  # [B*A, F]
-            #         m_sDash_a = m_sDash_a_flat.view(B, A, F)                                 # 🔙 [B, A, F]
-
-            #         q_values = (m_sDash_a @ w).squeeze(-1)                                   # [B, A]
-            #         best_m_sDash_a = m_sDash_a[torch.arange(batch_size), q_values.argmax(dim=1)]  # [B, F]
-
-            #     optimizer_alpha.zero_grad()
-            #     phi_s_batch_detached = phi_s_batch.detach()
-            #     best_m_sDash_a_detached = best_m_sDash_a.detach()
-            #     target_M = phi_s_batch_detached + gamma * best_m_sDash_a_detached * (1 - batch_dones)
-
-            #     m_sa_batch = successor_net(phi_s_batch_detached, batch_actions_oh)
-            #     loss_sr = ((target_M - m_sa_batch) ** 2).mean()
-            #     epoch_loss_sr.append(loss_sr.item())
-
-            #     if torch.isnan(loss_sr) or torch.isinf(loss_sr):
-            #         print("❌ Skipping loss_sr due to instability")
-            #         continue
-
-            #     loss_sr.backward()
-            #     torch.nn.utils.clip_grad_norm_(successor_net.parameters(), max_norm=50)
-            #     optimizer_alpha.step()
